@@ -99,7 +99,7 @@ static long handle_event(monloop_t *this, uint32_t evnts, int epollfd)
     curn+=n;
     assert(curn <= sizeof(this->line));
     
-    if (curn == sizeof(this->line) && this->line[curn]!='\n') {
+    if (curn == (sizeof(this->line)-1) && this->line[curn]!='\n') {
       fprintf(stderr, "exceeded monloop line buffer length=%ld...ignoring\n",
 	      sizeof(this->line));
       this->n = 0;
