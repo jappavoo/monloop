@@ -6,7 +6,8 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <string.h>
-
+#include <stdlib.h>
+#include <sys/timerfd.h>
 
 // incase we want to turn asserts off or interpose on them
 #define ASSERT(...) assert(__VA_ARGS__)
@@ -38,14 +39,73 @@ monloop_usage(monloop_t *this)
 }
 
 long
-monloop_help_cmd(monloop_t *this, int args, int epollfd)
+monloop_help_cmd(monloop_t *this, int args)
 {
   monloop_usage(this);
   return MONLOOP_CMD_OK;
 }
 
+int
+monloop_removetimer(monloop_t *this, monloop_timer_t *timer)
+{
+  monloop_timer_t *tmr = this->timers;
+  ASSERT(timer && tmr);
+  
+  if (tmr == timer) {
+    // head of list
+    this->timers = tmr->next;
+  } else {
+    // search the list
+    for (; tmr != NULL; tmr = tmr->next) {
+      if (tmr->next == timer) {
+	tmr->next = timer->next;
+	break;
+      }
+    }
+    ASSERT(tmr != NULL);
+  }
+  if (timer) { 
+    epoll_ctl(this->epollfd, EPOLL_CTL_DEL, timer->fd, NULL);
+    close(timer->fd);
+    free(timer);
+    return 1;
+  }
+  return 0;
+}
+
+monloop_timer_t *
+monloop_addtimer(monloop_t *this, int clockid, monloop_timer_func_t tfunc)
+{
+  int tfd;
+  monloop_timer_t *timer = (monloop_timer_t *)malloc(sizeof(monloop_timer_t));
+  ASSERT(timer != NULL);
+  timer->func    = tfunc;
+  timer->monloop = this;
+  timer->next    = this->timers;
+  this->timers   = timer;
+
+  tfd = timerfd_create(clockid, TFD_CLOEXEC | TFD_NONBLOCK);
+  ASSERT(tfd != -1);
+  timer->fd = tfd;
+  {
+      struct epoll_event ev;
+      int epollfd = this->epollfd;
+      int fd = tfd;
+      ev.events   = EPOLLIN;
+      ev.data.ptr = timer;
+      if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev) == -1 ) {
+	perror("epoll_ctl: fd");
+	goto error;
+      }
+  } 
+  return timer;
+ error:
+  monloop_removetimer(this, timer);
+  return NULL;
+}
+
 static long
-monProcess(monloop_t *this, int epollfd)
+monProcess(monloop_t *this)
 {
   char *cmd = this->line;
   int   n    = this->n;
@@ -71,7 +131,7 @@ monProcess(monloop_t *this, int epollfd)
   for (j=0; monloop_cmds[j].cmd != NULL; j++) {
     if (strncmp(cmd, monloop_cmds[j].name, i+1)==0) {
       monloop_cmd_t cmdfunc = monloop_cmds[j].cmd;
-      int rc = cmdfunc(this, args, epollfd); 
+      int rc = cmdfunc(this, args); 
       if (rc>=MONLOOP_CMD_OK)     { ML_PRINT(this, "%s", "OK\n"); }
       if (rc==MONLOOP_CMD_FAILED) { ML_PRINT(this, "%s", "FAILED\n"); }
       if (rc!=MONLOOP_CMD_EXIT)   { monloop_greeting(this); }
@@ -86,7 +146,7 @@ monProcess(monloop_t *this, int epollfd)
   return MONLOOP_CMD_FAILED;
 }
 
-static long handle_event(monloop_t *this, uint32_t evnts, int epollfd)
+static long handle_event(monloop_t *this, uint32_t evnts)
 {
   long rc=0;
   
@@ -107,7 +167,7 @@ static long handle_event(monloop_t *this, uint32_t evnts, int epollfd)
       this->n = curn;
       if (this->line[curn-1]=='\n') {
 	this->line[curn-1]='\0';
-	rc = monProcess(this, epollfd);
+	rc = monProcess(this);
 	this->n = 0;
       }
     }
@@ -152,7 +212,8 @@ static void *theLoop(void *arg)
       return NULL;
     }
   }
-
+  this->epollfd = epollfd;
+  
   // register for the monitor interface events
   {
       struct epoll_event ev;
@@ -194,12 +255,19 @@ static void *theLoop(void *arg)
     // Event Handling
     for (int n = 0; n < nfds; ++n) {
       uint32_t evnts = events[n].events;
-      ASSERT(this == events[n].data.ptr);
-      rc = handle_event(this, evnts, epollfd);
-      if (rc <= MONLOOP_CMD_EXIT) goto done;
+      if (this == events[n].data.ptr) {
+	// monitor command event
+	rc = handle_event(this, evnts);
+	if (rc <= MONLOOP_CMD_EXIT) goto done;
+      } else {
+	// timer event
+	monloop_timer_t *timer = (monloop_timer_t *)events[n].data.ptr;
+	ASSERT(timer->monloop == this);
+	rc = timer->func(timer, evnts);
+	if (rc <= MONLOOP_CMD_EXIT) goto done;
+      }
     }
   }
-  
  done:
   return (void *)rc;
 }
