@@ -8,6 +8,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/timerfd.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/mman.h>
 
 // incase we want to turn asserts off or interpose on them
 #define ASSERT(...) assert(__VA_ARGS__)
@@ -43,6 +46,45 @@ monloop_help_cmd(monloop_t *this, int args)
 {
   monloop_usage(this);
   return MONLOOP_CMD_OK;
+}
+
+int
+monloop_mapfile(const char *filename, void **addr, size_t *length)
+{
+  void *map;
+  struct stat sb;
+  int fd = open(filename, O_RDONLY | O_CLOEXEC);
+  if (fd == -1) {
+    perror("open");
+    return -1;
+  }
+ 
+  if (fstat(fd, &sb) == -1) {
+    perror("fstat");
+    close(fd);
+    return -1;
+  }
+
+  map = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  if (map == MAP_FAILED) {
+    perror("mmap");
+    close(fd);
+    return -1;
+  }
+  close(fd);
+  *addr = map;
+  *length = sb.st_size;
+  return 0;
+}
+
+int monloop_unmapfile(void *addr, size_t length)
+{
+  int rc = munmap(addr, length);
+  if (rc == -1) {
+    perror("munmap");
+    return -1;
+  }
+  return 0;
 }
 
 int

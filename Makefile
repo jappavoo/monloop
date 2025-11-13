@@ -1,4 +1,4 @@
-O          := 2
+O          := 0
 CFLAGS     += -g -O${O} -std=gnu99 -MD -MP -Wall
 LDFLAGS    += -lpthread
 

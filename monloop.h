@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include <sys/timerfd.h>
 
 #define MONLOOP_LINELEN 4096
 
@@ -39,8 +40,12 @@ typedef struct monloop_timer {
 
 int monloop_start(monloop_t *this, void *data, int fd, FILE *fp, bool silent);
 int monloop_join(monloop_t *this, void **exit_status);
-monloop_timer_t * monloop_addtimer(monloop_t *this, int clockid, monloop_timer_func_t tfunc); 
+monloop_timer_t * monloop_addtimer(monloop_t *this, int clockid,
+				   monloop_timer_func_t tfunc); 
 int monloop_removetimer(monloop_t *this, monloop_timer_t *timer);
+// convience functions for writting commands that work with data in files
+int monloop_mapfile(const char *filename, void **addr, size_t *length);
+int monloop_unmapfile(void *addr, size_t length);
 
 static inline int monloop_settimer(monloop_timer_t *tmr, 
 				  long sec, long nsec,
@@ -53,6 +58,10 @@ static inline int monloop_settimer(monloop_timer_t *tmr,
   new_value.it_interval.tv_nsec = insec;
   rc = timerfd_settime(tmr->fd, 0, &new_value, NULL);
   return rc;
+}
+
+static inline int monloop_canceltimer(monloop_timer_t *tmr) {
+	return monloop_settimer(tmr, 0, 0, 0, 0);
 }
 
 // deal with cleanup and destruciton
