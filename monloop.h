@@ -1,10 +1,13 @@
 #ifndef __monloop_h__
 #define __monloop_h__
-
 #include <stdio.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include <sys/timerfd.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define MONLOOP_LINELEN 4096
 
@@ -38,11 +41,11 @@ typedef struct monloop_timer {
   if (!this->silent) fprintf(this->fp, fmt, __VA_ARGS__);	\
   }
 
-int monloop_start(monloop_t *this, void *data, int fd, FILE *fp, bool silent);
-int monloop_join(monloop_t *this, void **exit_status);
-monloop_timer_t * monloop_addtimer(monloop_t *this, int clockid,
+int monloop_start(monloop_t *, void *data, int fd, FILE *fp, bool silent);
+int monloop_join(monloop_t *, void **exit_status);
+monloop_timer_t * monloop_addtimer(monloop_t *, int clockid,
 				   monloop_timer_func_t tfunc); 
-int monloop_removetimer(monloop_t *this, monloop_timer_t *timer);
+int monloop_removetimer(monloop_t *, monloop_timer_t *timer);
 // convience functions for writting commands that work with data in files
 int monloop_mapfile(const char *filename, void **addr, size_t *length);
 int monloop_unmapfile(void *addr, size_t length);
@@ -74,12 +77,15 @@ static inline int monloop_canceltimer(monloop_timer_t *tmr) {
 #define MONLOOP_CMD_FAILED  0
 
 typedef struct monloop_cmddesc {
-  char *name;
-  char *usage;
+  const char *name;
+  const char *usage;
   monloop_cmd_t cmd;
 } monloop_cmddesc_t;
 
-long monloop_help_cmd(monloop_t *this, int args);
+long monloop_help_cmd(monloop_t *, int args);
 
 extern monloop_cmddesc_t monloop_cmds[];
+#ifdef __cplusplus
+}
+#endif
 #endif
